@@ -1,5 +1,6 @@
 """
 The intrinsic parameters for Pandora front facing color camera.
+You can verify these parameters by looking in the Pandora Users' manual, page 7
 """
 import numpy as np
 from math import tan, pi

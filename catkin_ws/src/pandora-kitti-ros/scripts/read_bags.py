@@ -11,8 +11,8 @@ import logging
 import roslib
 import numpy as np
 import os
-from camera_intrinsics import K
 
+from datasetbuilder import DatasetBuider
 """
 Reads ros bags from a filepath and publishes the data to a topic.
 This is useful when we already have gathered data and want to simulate actual real-time recordings.
@@ -36,6 +36,8 @@ TODO:
     - Subscribing to calibration info from pandora (https://github.com/HesaiTechnology/Pandora_Apollo/blob/master/src/pandora.cc#L263)
     - Writing groundplane information to file
     - Writing camera intrinsic parameters to file
+    - Find out how high, relative to the ground the camera sensor is. 
+    - Find extrinsic transform between camera and lidar
 
 """
 
@@ -87,116 +89,28 @@ class DataConverter:
         self.db_builder.add_pointcloud(pointcloud2_array)
 
 
-class DatasetBuider:
-    """ Builds the dataset in kitti format so that our models can do inference on them """
-
-    def __init__(self, out_directory, pcl_format="bin"):
-        self.lidar_path = os.path.join(out_directory, "velodyne")
-        self.image_path = os.path.join(out_directory, "image_2")
-        self.label_path = os.path.join(out_directory, "label_2")
-        self.calib_path = os.path.join(out_directory, "calib")
-        self.groundplane_path = os.path.join(out_directory, "planes")
-
-        self.image_file_fmt = "{}.png"
-        self.lidar_file_fmt = "{}."+pcl_format
-        self.lidar_count = 0
-        self.image_count = 0
-
-        self._init_dirs()
-
-        self.K = K
-
-    def _init_dirs(self):
-        """ Creates all the directories necessary for the kitti file format if they do not already exist """
-        dirs = [self.lidar_path, self.image_path, self.label_path,
-                self.calib_path, self.groundplane_path]
-        for dir_path in dirs:
-            if not os.path.exists(dir_path):
-                os.mkdir(dir_path)
-
-    def add_pointcloud(self, pointcloud, pcl_format="bin"):
-        """Save this point-cloud to disk as PLY or bin format."""
-        filename = self.lidar_file_fmt.format(self.lidar_count)
-        lidar_filepath = os.path.join(self.lidar_path, filename)
-        if pcl_format == "bin":
-            # Points are of the format
-            # x, y, z, intensity, timestamp, ring
-            pointcloud = np.array([[x, y, z, intensity] for x, y, z, intensity,
-                                   _, _ in pc2.read_points(pointcloud, skip_nans=True)])
-            pointcloud.astype(np.float32).tofile(lidar_filepath)
-            self.lidar_count += 1
-        elif pcl_format == "ply":
-            points = [[x, y, z] for x, y, z, _, _, _ in pc2.read_points(
-                pointcloud, skip_nans=True)]
-            ply = '\n'.join(['{:.2f} {:.2f} {:.2f}'.format(*p)
-                             for p in points])
-            num_points = len(points)
-            # Open the file and save with the specific PLY format.
-            with open(filename, 'w+') as ply_file:
-                ply_file.write(
-                    '\n'.join([self._construct_ply_header(num_points), ply]))
-            self.lidar_count += 1
-        else:
-            raise ValueError("Format must be of type 'bin' or 'ply'")
-
-    def add_image(self, image):
-        """ Save image to dataset in png format """
-        filename = self.image_file_fmt.format(self.image_count)
-        image_filepath = os.path.join(self.image_path, filename)
-        cv2.imwrite(image_filepath, image)
-        self.image_count += 1
-
-    def _save_calibration_matrices(self):
-    """ Saves the calibration matrices to a file.
-       AVOD (and KITTI) refers to P as P=K*[R;t], so we will just store P.
-       The resulting file will contain:
-       3x4    p0-p3      Camera P matrix. Contains extrinsic
-                         and intrinsic parameters. (P=K*[R;t])
-       3x3    r0_rect    Rectification matrix, required to transform points
-                         from velodyne to camera coordinate frame.
-       3x4    tr_velodyne_to_cam    Used to transform from velodyne to cam
-                                    coordinate frame according to:
-                                    Point_Camera = P_cam * R0_rect *
-                                                   Tr_velo_to_cam *
-                                                   Point_Velodyne.
-       3x4    tr_imu_to_velo        Used to transform from imu to velodyne coordinate frame. This is not needed since we do not export
-                                    imu data.
-    """
-
-    def _construct_ply_header(self, num_points):
-        """Generates a PLY header given a total number of 3D points and
-        coloring property if specified
-        """
-
-        header = ['ply',
-                  'format ascii 1.0',
-                  'element vertex {}',
-                  'property float32 x',
-                  'property float32 y',
-                  'property float32 z',
-                  'property uchar diffuse_red',
-                  'property uchar diffuse_green',
-                  'property uchar diffuse_blue',
-                  'end_header']
-
-        return '\n'.join(header[0:6] + [header[-1]]).format(num_points)
-
-
 def read_bag(filepath, topics):
     print("Reading bag with filepath ", filepath)
     image_publisher = rospy.Publisher(
-        IMAGE_TOPIC, Image, queue_size=1)
-    pcl_publisher = rospy.Publisher(PCL_TOPIC, PointCloud2, queue_size=1)
+        IMAGE_TOPIC, Image, queue_size=0)
+    pcl_publisher = rospy.Publisher(PCL_TOPIC, PointCloud2, queue_size=0)
     bag = rosbag.Bag(filepath)
 
     c = 0
+    num_images = 0
+    num_pcls = 0
     for topic, msg, t in bag.read_messages(topics=topics):
+        if num_images > 10 and num_pcls > 10:
+            break
         if topic == IMAGE_TOPIC:
-            print("Publishing topic {} at timestamp {}".format(topic, t))
+            num_images += 1
+            #print("Publishing topic {} at timestamp {}".format(topic, t))
             image_publisher.publish(msg)
         if topic == PCL_TOPIC:
-            print("Publishing topic {} at timestamp {}".format(topic, t))
+            num_pcls += 1
+            #print("Publishing topic {} at timestamp {}".format(topic, t))
             pcl_publisher.publish(msg)
+        print("Images: {}, PCLS: {}".format(num_images, num_pcls))
 
     bag.close()
 
@@ -213,7 +127,9 @@ if __name__ == "__main__":
     topics = ["/pandora/sensor/pandora/camera/front_color",
               "/pandora/sensor/pandora/hesai40/PointCloud2"]
     rospy.init_node('data_converter', anonymous=True)
+    # Set up listener for image and pointclouds
     dc = DataConverter()
+    # Publish image and pointcloud topics
     read_bag(args.filepath, topics=topics)
 
     try:
