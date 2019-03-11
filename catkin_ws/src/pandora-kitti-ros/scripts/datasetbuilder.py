@@ -38,6 +38,8 @@ class DatasetBuider:
         """Save this point-cloud to disk as PLY or bin format.
             In addition, this call triggers the save_calibration_matrices function, since
             we need to store calibration matrices for each frame.
+            Pandora by default follows the FLU-system x: forward, left, up (CHECK THIS)
+            NOTE: When saving to .bin, we flip the y-axis to get the same coordinate system as KITTI.
         """
         filename = self.lidar_file_fmt.format(self.lidar_count)
         lidar_filepath = os.path.join(self.lidar_path, filename)
@@ -46,7 +48,8 @@ class DatasetBuider:
         if pcl_format == "bin":
             # Points are of the format
             # x, y, z, intensity, timestamp, ring
-            pointcloud = np.array([[x, y, z, intensity] for x, y, z, intensity,
+            # Flip the points from x, y,z to -y, x, z
+            pointcloud = np.array([[-y, x, z, intensity] for x, y, z, intensity,
                                    _, _ in pc2.read_points(pointcloud, skip_nans=skip_nans)])
             pointcloud.astype(np.float32).tofile(lidar_filepath)
         elif pcl_format == "ply":
@@ -92,7 +95,6 @@ class DatasetBuider:
         P0 = np.column_stack((P0, np.array([0, 0, 0])))
         P0 = np.ravel(P0, order=ravel_mode)
         R0 = np.identity(3)
-        # TODO: Change this to fit Pandora to KITTI lidar transform
         TR_velodyne = np.array([[0, -1, 0],
                                 [0, 0, -1],
                                 [1, 0, 0]])
