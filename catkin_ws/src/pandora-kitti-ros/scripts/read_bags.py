@@ -38,6 +38,7 @@ TODO:
     - Writing camera intrinsic parameters to file
     - Find out how high, relative to the ground the camera sensor is. 
     - Find extrinsic transform between camera and lidar
+    - Crop images to 1224x370 (kitti resolution)
 
 """
 
@@ -100,17 +101,16 @@ def read_bag(filepath, topics):
     num_images = 0
     num_pcls = 0
     for topic, msg, t in bag.read_messages(topics=topics):
-        if num_images > 10 and num_pcls > 10:
-            break
+        if topic in [IMAGE_TOPIC, PCL_TOPIC]:
+            print("Images: {}, PCLS: {}".format(num_images, num_pcls))
         if topic == IMAGE_TOPIC:
             num_images += 1
-            #print("Publishing topic {} at timestamp {}".format(topic, t))
+            print("Publishing topic {} at timestamp {}".format(topic, t))
             image_publisher.publish(msg)
         if topic == PCL_TOPIC:
             num_pcls += 1
-            #print("Publishing topic {} at timestamp {}".format(topic, t))
+            print("Publishing topic {} at timestamp {}".format(topic, t))
             pcl_publisher.publish(msg)
-        print("Images: {}, PCLS: {}".format(num_images, num_pcls))
 
     bag.close()
 
