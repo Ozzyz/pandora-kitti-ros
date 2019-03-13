@@ -54,3 +54,4 @@ CATKIN_IGNORE
 pandora_recording/
 # Dataset
 _out/
+*.tar.gz
